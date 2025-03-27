@@ -5,7 +5,7 @@ use {
     solana_bench_tps::{
         bench::{do_bench_tps, generate_and_fund_keypairs},
         cli::{Config, InstructionPaddingConfig},
-        send_batch::generate_durable_nonce_accounts,
+        send_batch::generate_durable_nonce_accounts, tx_generator::{self, TxGenerator},
     },
     solana_client::{
         thin_client::ThinClient,

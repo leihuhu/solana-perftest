@@ -1,0 +1,149 @@
+{
+  "address": "95HvDrwhVst6NHgypA77UfSxZQ33YAaCRjv9gZoi725n",
+  "metadata": {
+    "name": "ballot",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Created with Anchor"
+  },
+  "instructions": [
+    {
+      "name": "finalize",
+      "discriminator": [
+        171,
+        61,
+        218,
+        56,
+        127,
+        115,
+        12,
+        217
+      ],
+      "accounts": [
+        {
+          "name": "ballot_box",
+          "writable": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "init",
+      "discriminator": [
+        220,
+        59,
+        207,
+        236,
+        108,
+        250,
+        47,
+        100
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "ballot_box",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "arg",
+                "path": "_ballot_name"
+              },
+              {
+                "kind": "arg",
+                "path": "_sub_order"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "_ballot_name",
+          "type": "string"
+        },
+        {
+          "name": "_sub_order",
+          "type": "string"
+        },
+        {
+          "name": "_proposals",
+          "type": {
+            "vec": "string"
+          }
+        }
+      ]
+    },
+    {
+      "name": "vote",
+      "discriminator": [
+        227,
+        110,
+        155,
+        23,
+        136,
+        126,
+        172,
+        25
+      ],
+      "accounts": [
+        {
+          "name": "ballot_box",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "order",
+          "type": "u64"
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "BallotBox",
+      "discriminator": [
+        155,
+        169,
+        156,
+        8,
+        92,
+        14,
+        24,
+        101
+      ]
+    }
+  ],
+  "types": [
+    {
+      "name": "BallotBox",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "proposals",
+            "type": {
+              "vec": "string"
+            }
+          },
+          {
+            "name": "votes",
+            "type": {
+              "vec": "u64"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

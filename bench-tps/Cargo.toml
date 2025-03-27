@@ -40,6 +40,8 @@ solana-tpu-client = { workspace = true }
 solana-version = { workspace = true }
 spl-instruction-padding = { workspace = true }
 thiserror = { workspace = true }
+csv = { workspace = true }
+serde = { version = "1.0", features = ["derive"] }
 
 [dev-dependencies]
 serial_test = { workspace = true }

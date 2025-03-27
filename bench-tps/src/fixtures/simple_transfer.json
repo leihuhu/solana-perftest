@@ -1,0 +1,152 @@
+{
+  "address": "DJjSesrXhPFHKEd7n5up3JVDkhZsXk2gL8mN3A88m1E8",
+  "metadata": {
+    "name": "simple_transfer",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Created with Anchor"
+  },
+  "instructions": [
+    {
+      "name": "init_user",
+      "discriminator": [
+        14,
+        51,
+        68,
+        159,
+        237,
+        78,
+        158,
+        102
+      ],
+      "accounts": [
+        {
+          "name": "user_account",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  97,
+                  108,
+                  97,
+                  110,
+                  99,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "payer"
+              }
+            ]
+          }
+        },
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "initial_balance",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "transfer",
+      "discriminator": [
+        163,
+        52,
+        200,
+        231,
+        140,
+        3,
+        69,
+        186
+      ],
+      "accounts": [
+        {
+          "name": "from",
+          "writable": true
+        },
+        {
+          "name": "to",
+          "writable": true
+        },
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "from"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "UserBalance",
+      "discriminator": [
+        187,
+        237,
+        208,
+        146,
+        86,
+        132,
+        29,
+        191
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "OwnerMismatch",
+      "msg": "Owner Mismatch"
+    },
+    {
+      "code": 6001,
+      "name": "InsufficientBalance",
+      "msg": "Insufficient Balance"
+    },
+    {
+      "code": 6002,
+      "name": "Overflow",
+      "msg": "Overflow"
+    }
+  ],
+  "types": [
+    {
+      "name": "UserBalance",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "balance",
+            "type": "u64"
+          }
+        ]
+      }
+    }
+  ]
+}

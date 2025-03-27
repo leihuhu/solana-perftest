@@ -4,6 +4,7 @@ use {
         cli::{ComputeUnitPrice, Config, InstructionPaddingConfig},
         perf_utils::{sample_txs, SampleStats},
         send_batch::*,
+        tx_generator::{ballot_tx_generator::BallotTxGenerator, replay_tx_generator::ReplayTxGenerator, system_tx_generator::SystemTxGenerator, token_tx_generator::TokenTxGenerator, *},
     },
     log::*,
     rand::distributions::{Distribution, Uniform},
@@ -11,29 +12,14 @@ use {
     solana_client::{nonce_utils, rpc_request::MAX_MULTIPLE_ACCOUNTS},
     solana_metrics::{self, datapoint_info},
     solana_sdk::{
-        account::Account,
-        clock::{DEFAULT_MS_PER_SLOT, DEFAULT_S_PER_SLOT, MAX_PROCESSING_AGE},
-        compute_budget::ComputeBudgetInstruction,
-        hash::Hash,
-        instruction::{AccountMeta, Instruction},
-        message::Message,
-        native_token::Sol,
-        pubkey::Pubkey,
-        signature::{Keypair, Signer},
-        system_instruction,
-        timing::{duration_as_ms, duration_as_s, duration_as_us, timestamp},
-        transaction::Transaction,
+        account::Account, clock::{DEFAULT_MS_PER_SLOT, DEFAULT_S_PER_SLOT, MAX_PROCESSING_AGE}, compute_budget::ComputeBudgetInstruction, hash::Hash, instruction::{AccountMeta, Instruction}, message::Message, native_token::Sol, pubkey::Pubkey, signature::{Keypair, Signer}, system_instruction, timing::{duration_as_ms, duration_as_s, duration_as_us, timestamp}, transaction::Transaction,
     },
     spl_instruction_padding::instruction::wrap_instruction,
     std::{
-        collections::{HashSet, VecDeque},
-        process::exit,
-        sync::{
+        collections::{HashMap, HashSet, VecDeque}, process::exit, sync::{
             atomic::{AtomicBool, AtomicIsize, AtomicUsize, Ordering},
             Arc, RwLock,
-        },
-        thread::{sleep, Builder, JoinHandle},
-        time::{Duration, Instant},
+        }, thread::{sleep, Builder, JoinHandle}, time::{Duration, Instant}
     },
 };
 
@@ -291,6 +277,35 @@ where
         .unwrap()
 }
 
+fn generate_contract_txs(
+    gen_keypairs: &Vec<Keypair>,
+    shared_txs: &SharedTransactions,
+    tx_generator: &Box<dyn TxGenerator>,
+    blockhash: Arc<RwLock<Hash>>,
+    threads: usize,
+    duration: Duration,
+    shared_tx_active_thread_count: Arc<AtomicIsize>,
+){
+    let blockhash = blockhash.read().unwrap();
+    let transactions = tx_generator.generate(&gen_keypairs, &blockhash);
+    info!("Generated {} contract transactions", transactions.len());
+    let sz = transactions.len() / threads;
+    let chunks: Vec<_> = transactions.chunks(sz).collect();
+    {
+        let mut shared_txs_wl = shared_txs.write().unwrap();
+        for chunk in chunks {
+            shared_txs_wl.push_back(chunk.to_vec());
+        }
+    }
+    while !shared_txs.read().unwrap().is_empty()
+        || shared_tx_active_thread_count.load(Ordering::Relaxed) > 0
+    {
+        sleep(Duration::from_millis(1));
+    }
+    // wait Sampler
+    sleep(duration);
+}
+
 fn generate_chunked_transfers<T: 'static + BenchTpsClient + Send + Sync + ?Sized>(
     recent_blockhash: Arc<RwLock<Hash>>,
     shared_txs: &SharedTransactions,
@@ -400,19 +415,13 @@ where
         use_durable_nonce,
         instruction_padding_config,
         num_conflict_groups,
+        contract,
+        account_num,
+        replay_tx_path,
         ..
     } = config;
 
     assert!(gen_keypairs.len() >= 2 * tx_count);
-    let chunk_generator = TransactionChunkGenerator::new(
-        client.clone(),
-        &gen_keypairs,
-        nonce_keypairs.as_ref(),
-        tx_count,
-        compute_unit_price,
-        instruction_padding_config,
-        num_conflict_groups,
-    );
 
     let first_tx_count = loop {
         match client.get_transaction_count() {
@@ -469,18 +478,101 @@ where
 
     wait_for_target_slots_per_epoch(target_slots_per_epoch, &client);
 
+    
+    let contract_tx_generator: Option<Box<dyn TxGenerator>> = if let Some(contract) = contract {
+        info!("Running contract test: {}", contract);
+        match contract.as_str() {
+            "ballot" => {
+                let ballot_tx_generator = BallotTxGenerator::new();
+                let blockhash = client.get_latest_blockhash().unwrap();
+                let account_num = if let Some(account_num) = account_num {
+                    account_num
+                } else {
+                    4
+                };
+                let (ballot_tx_generator, transactions) = ballot_tx_generator.initialize(&gen_keypairs[0], &blockhash, HashMap::from([(String::from("ballot_box_num"), account_num.to_string())]));
+                client.send_batch(transactions).err().map(|e| {
+                    warn!("Failed to send transactions: {:?}", e);
+                });
+                Some(Box::new(ballot_tx_generator))
+            }
+            "system_transfer" => {
+                Some(Box::new(SystemTxGenerator::new(1)))
+            }
+            "system_airdrop" => {
+                let account_num = if let Some(account_num) = account_num {
+                    account_num
+                } else {
+                    1
+                };
+                Some(Box::new(SystemTxGenerator::new(account_num)))
+            }
+            // "token_transfer" => {
+            //     Some(Box::new(TokenTxGenerator::new(1)))
+            // }
+            // "token_airdrop" => {
+            //     let account_num = if let Some(account_num) = account_num {
+            //         account_num
+            //     } else {
+            //         1
+            //     };
+            //     Some(Box::new(TokenTxGenerator::new(account_num)))
+            // }
+            "replay" => {
+                let replay_tx_generator = ReplayTxGenerator::new();
+                let blockhash = client.get_latest_blockhash().unwrap();
+                let replay_tx_path = if let Some(replay_tx_path) = replay_tx_path {
+                    replay_tx_path
+                } else {
+                    "bench-tps/src/data/USDT_240101_240331_data_100000.csv".to_string()
+                };
+                let (replay_tx_generator, _) = replay_tx_generator.initialize(&gen_keypairs[0], &blockhash, HashMap::from([(String::from("replay_tx_path"), replay_tx_path)]));
+                Some(Box::new(replay_tx_generator))
+            }
+            _ => {
+                info!("Unknown contract test: {contract}");
+                None
+            }
+        }
+    } else {
+        None
+    };
+       
+    let chunk_generator = TransactionChunkGenerator::new(
+        client.clone(),
+        &gen_keypairs,
+        nonce_keypairs.as_ref(),
+        tx_count,
+        compute_unit_price,
+        instruction_padding_config,
+        num_conflict_groups,
+    );
+
     let start = Instant::now();
 
-    generate_chunked_transfers(
-        blockhash,
-        &shared_txs,
-        shared_tx_active_thread_count,
-        chunk_generator,
-        threads,
-        duration,
-        sustained,
-        use_durable_nonce,
-    );
+    if let Some(contract_tx_generator) = contract_tx_generator {
+        generate_contract_txs(
+            &gen_keypairs, 
+            &shared_txs, 
+            &contract_tx_generator, 
+            blockhash, 
+            threads,
+            duration,
+            shared_tx_active_thread_count,
+        );
+    } else {
+        generate_chunked_transfers(
+            blockhash,
+            &shared_txs,
+            shared_tx_active_thread_count,
+            chunk_generator,
+            threads,
+            duration,
+            sustained,
+            use_durable_nonce,
+        );
+    }
+       
 
     // Stop the sampling threads so it will collect the stats
     exit_signal.store(true, Ordering::Relaxed);

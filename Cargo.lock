@@ -5470,9 +5470,11 @@ version = "1.18.26"
 dependencies = [
  "clap 2.33.3",
  "crossbeam-channel",
+ "csv",
  "log",
  "rand 0.8.5",
  "rayon",
+ "serde",
  "serde_json",
  "serde_yaml 0.9.30",
  "serial_test",

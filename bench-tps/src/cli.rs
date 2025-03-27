@@ -12,8 +12,7 @@ use {
     },
     solana_tpu_client::tpu_client::{DEFAULT_TPU_CONNECTION_POOL_SIZE, DEFAULT_TPU_USE_QUIC},
     std::{
-        net::{IpAddr, Ipv4Addr, SocketAddr},
-        time::Duration,
+        collections::HashMap, net::{IpAddr, Ipv4Addr, SocketAddr}, time::Duration
     },
 };
 
@@ -80,6 +79,9 @@ pub struct Config {
     pub num_conflict_groups: Option<usize>,
     pub bind_address: IpAddr,
     pub client_node_id: Option<Keypair>,
+    pub contract: Option<String>,
+    pub account_num: Option<usize>,
+    pub replay_tx_path: Option<String>,
 }
 
 impl Eq for Config {}
@@ -115,6 +117,9 @@ impl Default for Config {
             num_conflict_groups: None,
             bind_address: IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)),
             client_node_id: None,
+            contract: None,
+            account_num: None,
+            replay_tx_path: None,
         }
     }
 }
@@ -396,6 +401,29 @@ pub fn build_args<'a>(version: &'_ str) -> App<'a, '_> {
                 .validator(is_keypair)
                 .help("File containing the node identity (keypair) of a validator with active stake. This allows communicating with network using staked connection"),
         )
+        .arg(
+            Arg::with_name("contract")
+                .long("contract")
+                .value_name("contract")
+                .takes_value(true)
+                .global(true)
+                .help("Test contract name"),
+        )
+        .arg(
+            Arg::with_name("account_num")
+                .long("account-num")
+                .value_name("account_num")
+                .takes_value(true)
+                .help("The number of accounts to create when initializing the contract"),
+        )
+        .arg({
+            Arg::with_name("replay_tx_path")
+                .long("replay-tx-path")
+                .value_name("FILEPATH")
+                .takes_value(true)
+                .global(true)
+                .help("ERC20 replay transaction file to use")
+        })
 }
 
 /// Parses a clap `ArgMatches` structure into a `Config`
@@ -575,6 +603,18 @@ pub fn parse_args(matches: &ArgMatches) -> Result<Config, &'static str> {
         // error is checked by arg validator
         let client_node_id = read_keypair_file(client_node_id_filename).map_err(|_| "")?;
         args.client_node_id = Some(client_node_id);
+    }
+
+    if let Some(c) = matches.value_of("contract") {
+        args.contract = Some(c.to_string());
+    }
+
+    if let Some(a) = matches.value_of("account_num") {
+        args.account_num = Some(a.to_string().parse::<usize>().map_err(|_| "can't parse account-num")?);
+    }
+
+    if let Some(f) = matches.value_of("replay_tx_path") {
+        args.replay_tx_path = Some(f.to_string());
     }
 
     Ok(args)
