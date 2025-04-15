@@ -109,6 +109,9 @@ while [[ -n $1 ]]; do
     elif [[ $1 == --block-production-method ]]; then
       args+=("$1" "$2")
       shift 2
+    elif [[ $1 == --cpu-list ]]; then
+      cpu_list=$2
+      shift 2 
     else
       echo "Unknown argument: $1"
       $program --help
@@ -120,6 +123,11 @@ while [[ -n $1 ]]; do
     exit 1
   fi
 done
+
+if [[ -z "$cpu_list" ]]; then
+    cpu_cores=$(nproc --all)
+    cpu_list="0-$((cpu_cores - 1))"
+fi
 
 # These keypairs are created by ./setup.sh and included in the genesis config
 identity=$SOLANA_CONFIG_DIR/bootstrap-validator/identity.json
@@ -176,8 +184,8 @@ kill_node_and_exit() {
 trap 'kill_node_and_exit' INT TERM ERR
 
 while true; do
-  echo "$program ${args[*]}"
-  $program "${args[@]}" &
+  echo "taskset --cpu-list ${cpu_list} $program ${args[*]}"
+  taskset --cpu-list ${cpu_list} $program "${args[@]}" &
   pid=$!
   echo "pid: $pid"
 

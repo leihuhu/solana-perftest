@@ -12,7 +12,7 @@ use {
     },
     solana_tpu_client::tpu_client::{DEFAULT_TPU_CONNECTION_POOL_SIZE, DEFAULT_TPU_USE_QUIC},
     std::{
-        collections::HashMap, net::{IpAddr, Ipv4Addr, SocketAddr}, time::Duration
+        net::{IpAddr, Ipv4Addr, SocketAddr}, time::Duration
     },
 };
 

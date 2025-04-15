@@ -278,7 +278,7 @@ where
 }
 
 fn generate_contract_txs(
-    gen_keypairs: &Vec<Keypair>,
+    gen_keypairs: &mut Vec<Keypair>,
     shared_txs: &SharedTransactions,
     tx_generator: &Box<dyn TxGenerator>,
     blockhash: Arc<RwLock<Hash>>,
@@ -286,24 +286,29 @@ fn generate_contract_txs(
     duration: Duration,
     shared_tx_active_thread_count: Arc<AtomicIsize>,
 ){
-    let blockhash = blockhash.read().unwrap();
-    let transactions = tx_generator.generate(&gen_keypairs, &blockhash);
-    info!("Generated {} contract transactions", transactions.len());
-    let sz = transactions.len() / threads;
-    let chunks: Vec<_> = transactions.chunks(sz).collect();
-    {
-        let mut shared_txs_wl = shared_txs.write().unwrap();
-        for chunk in chunks {
-            shared_txs_wl.push_back(chunk.to_vec());
+    let start = Instant::now();
+    while start.elapsed() < duration {
+        // 获取最新的blockhash
+        let blockhash = blockhash.read().map(|x| *x).ok();
+        let transactions = tx_generator.generate(&gen_keypairs, blockhash.as_ref().unwrap());
+        info!("Generated {} contract transactions", transactions.len());
+        let sz = transactions.len() / threads;
+        let chunks: Vec<_> = transactions.chunks(sz).collect();
+        {
+            let mut shared_txs_wl = shared_txs.write().unwrap();
+            for chunk in chunks {
+                shared_txs_wl.push_back(chunk.to_vec());
+            }
         }
+        while !shared_txs.read().unwrap().is_empty()
+            || shared_tx_active_thread_count.load(Ordering::Relaxed) > 0
+        {
+            sleep(Duration::from_millis(10));
+        }
+        let length = gen_keypairs.len();
+        gen_keypairs[length/2..].rotate_left(1);
     }
-    while !shared_txs.read().unwrap().is_empty()
-        || shared_tx_active_thread_count.load(Ordering::Relaxed) > 0
-    {
-        sleep(Duration::from_millis(1));
-    }
-    // wait Sampler
-    sleep(duration);
+   
 }
 
 fn generate_chunked_transfers<T: 'static + BenchTpsClient + Send + Sync + ?Sized>(
@@ -397,7 +402,7 @@ where
 pub fn do_bench_tps<T>(
     client: Arc<T>,
     config: Config,
-    gen_keypairs: Vec<Keypair>,
+    mut gen_keypairs: Vec<Keypair>,
     nonce_keypairs: Option<Vec<Keypair>>,
 ) -> u64
 where
@@ -483,17 +488,14 @@ where
         info!("Running contract test: {}", contract);
         match contract.as_str() {
             "ballot" => {
-                let ballot_tx_generator = BallotTxGenerator::new();
+                let ballot_tx_generator = BallotTxGenerator::new(client.clone());
                 let blockhash = client.get_latest_blockhash().unwrap();
                 let account_num = if let Some(account_num) = account_num {
                     account_num
                 } else {
                     4
                 };
-                let (ballot_tx_generator, transactions) = ballot_tx_generator.initialize(&gen_keypairs[0], &blockhash, HashMap::from([(String::from("ballot_box_num"), account_num.to_string())]));
-                client.send_batch(transactions).err().map(|e| {
-                    warn!("Failed to send transactions: {:?}", e);
-                });
+                let ballot_tx_generator = ballot_tx_generator.initialize(&gen_keypairs, &blockhash, HashMap::from([(String::from("ballot_box_num"), account_num.to_string())]));
                 Some(Box::new(ballot_tx_generator))
             }
             "system_transfer" => {
@@ -507,17 +509,23 @@ where
                 };
                 Some(Box::new(SystemTxGenerator::new(account_num)))
             }
-            // "token_transfer" => {
-            //     Some(Box::new(TokenTxGenerator::new(1)))
-            // }
-            // "token_airdrop" => {
-            //     let account_num = if let Some(account_num) = account_num {
-            //         account_num
-            //     } else {
-            //         1
-            //     };
-            //     Some(Box::new(TokenTxGenerator::new(account_num)))
-            // }
+            "token_transfer" => {
+                let token_tx_generator = TokenTxGenerator::new(client.clone(), 1);
+                let blockhash = client.get_latest_blockhash().unwrap();
+                let token_tx_generator = token_tx_generator.initialize(&gen_keypairs, &blockhash, HashMap::new());
+                Some(Box::new(token_tx_generator))
+            }
+            "token_airdrop" => {
+                let account_num = if let Some(account_num) = account_num {
+                    account_num
+                } else {
+                    1
+                };
+                let token_tx_generator = TokenTxGenerator::new(client.clone(), account_num);
+                let blockhash = client.get_latest_blockhash().unwrap();
+                let token_tx_generator = token_tx_generator.initialize(&gen_keypairs, &blockhash, HashMap::new());
+                Some(Box::new(token_tx_generator))
+            }
             "replay" => {
                 let replay_tx_generator = ReplayTxGenerator::new();
                 let blockhash = client.get_latest_blockhash().unwrap();
@@ -526,7 +534,7 @@ where
                 } else {
                     "bench-tps/src/data/USDT_240101_240331_data_100000.csv".to_string()
                 };
-                let (replay_tx_generator, _) = replay_tx_generator.initialize(&gen_keypairs[0], &blockhash, HashMap::from([(String::from("replay_tx_path"), replay_tx_path)]));
+                let replay_tx_generator = replay_tx_generator.initialize(&gen_keypairs, &blockhash, HashMap::from([(String::from("replay_tx_path"), replay_tx_path)]));
                 Some(Box::new(replay_tx_generator))
             }
             _ => {
@@ -552,7 +560,7 @@ where
 
     if let Some(contract_tx_generator) = contract_tx_generator {
         generate_contract_txs(
-            &gen_keypairs, 
+            &mut gen_keypairs, 
             &shared_txs, 
             &contract_tx_generator, 
             blockhash, 
